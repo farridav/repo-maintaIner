@@ -4,51 +4,73 @@ import os
 import requests
 import yaml
 
-from fabric.api import env, lcd, local, task, abort, prompt
+from fabric.api import env, lcd, local, task, abort
 from fabric.colors import green, red, magenta, cyan
 
+DEFAULTS = {
+    'repo_root': os.path.join(os.path.dirname(__file__), 'repos'),
+    'repo_exclude': []
+}
 
-def populate_env():
+
+def get_available_repos(repo_root):
+    """
+    Build up available repos by walking the repos directory
+    """
+    available_repos = {}
+
+    for (path, dirs, files) in os.walk(env.repo_root):
+        for repo in dirs:
+            available_repos[repo] = {'path': os.path.join(path, repo)}
+        break
+
+    return available_repos
+
+
+def configure():
     """
     Populate our env with our settings and a list of available repos
     """
+
+    # defaults
+    config = DEFAULTS.copy()
 
     # Load in env vars if found
     if os.path.isfile('env.yml'):
         with open('env.yml') as settings:
             env_settings = yaml.load(settings.read())
+            config.update(env_settings)
 
-            for key, value in env_settings.iteritems():
-                setattr(env, key, value)
+    for key, value in config.iteritems():
+        setattr(env, key, value)
 
-    # Build up available repos by walking the repos directory
-    env.repos = {}
-    env.repo_root = os.path.join(os.path.dirname(__file__), 'repos')
+    # This may be our first time, if so, make our repo root
     if not os.path.isdir(env.repo_root):
         os.makedirs(env.repo_root)
 
-    for (path, dirs, files) in os.walk(env.repo_root):
-        for repo in dirs:
-            env.repos[repo] = {'path': os.path.join(path, repo)}
-        break
+    env.available_repos = get_available_repos(env.repo_root)
 
-# Ensure we always populate the env
-populate_env()
+    # default our usable repos to all available ones
+    env.repos = env.available_repos.keys()
+
+# Ensure we always load in our config
+configure()
 
 
-@task
+@task(alias='with')
 def use(*args):
     """
-    Use the given repos (e.g: fab use:nginx,postgresql pr)
+    Use the given repos (e.g: fab with:nginx,postgresql pr)
     """
-    new_repos = {}
+    repos = []
     for repo in args:
-        if repo in env.repos:
-            new_repos[repo] = env.repos[repo]
+        # Check if the given repo exists in our filesystem
+        if repo in env.available_repos:
+            repos.append(repo)
         else:
             print(red('{} does not exist, ommiting'.format(repo)))
 
-    env.repos = new_repos
+    env.repos = repos
 
 
 @task
@@ -56,24 +78,22 @@ def without(*args):
     """
     Omit the given repos (e.g: fab without:postgresql,nodejs setup)
     """
+    repos = env.repos
     for repo in args:
-        if repo in env.repos:
-            del env.repos[repo]
+        # Check if the given repo exists in our filesystem
+        if repo in env.available_repos:
+            repos.remove(repo)
         else:
             print(red('{} does not exist, skipping'.format(repo)))
 
+    env.repos = repos
+
 
 @task
-def setup():
+def clone():
     """
     Clone all the repos for the given organisation
     """
-
-    # First run, setup and env.yml and track the organisation name
-    if 'organisation' not in env:
-        org = prompt('\nName of the organisation on github?\n')
-        local('echo "---\n\norganisation: {}" > env.yml'.format(org))
-        env.organisation = org
 
     response = requests.get(
         'https://api.github.com/orgs/{}/repos'.format(env.organisation))
@@ -81,7 +101,9 @@ def setup():
 
     for repo in github_response:
         repo_name = repo['ssh_url'].split('/', -1).pop().replace('.git', '')
-        if repo_name not in env.repos:
+
+        if (repo_name not in env.available_repos
+                and repo_name not in env.repo_exclude):
             with lcd(env.repo_root):
                 print(green('\nCloning {}'.format(repo_name)))
                 local('git clone {}'.format(repo['ssh_url']))
@@ -101,10 +123,10 @@ def pr(pr_num=None):
     N.B - designed for only one repo at a time
     """
 
-    if len(env.repos.keys()) != 1:
+    if len(env.repos) != 1:
         abort(red('Can only be run with one repo'))
 
-    for repo, data in env.repos.iteritems():
+    for repo in env.repos:
         response = requests.get(
             'https://api.github.com/repos/{owner}/{repo}/pulls?state=open&'
             'sort=created&direction=asc'.format(
@@ -119,12 +141,9 @@ def pr(pr_num=None):
                     pr['number'], pr['user']['login']
                 )))
                 print(green(pr['body']))
-                print(magenta('\n\tfab use:{} pr:{}'.format(
+                print(magenta('\n\tfab with:{} pr:{}'.format(
                     repo, pr['number'])))
 
-            print(
-                cyan('\nfab use:{} pr:#pr_number to work on a PR'.format(repo))
-            )
             break
 
         pr = [pr for pr in github_response if pr['number'] == int(pr_num)]
@@ -134,7 +153,7 @@ def pr(pr_num=None):
         else:
             abort(red('PR not found'))
 
-        with lcd(data['path']):
+        with lcd(env.available_repos[repo]['path']):
             local('git remote add {} {}'.format(
                 pr['user']['login'], pr['head']['repo']['git_url']
             ))
@@ -149,7 +168,7 @@ def sh(command):
     """
     Run an arbitrary shell command on the selected repos
     """
-    for repo, data in env.repos.iteritems():
+    for repo in env.repos:
         print(green('\n{}'.format(repo)))
-        with lcd(data['path']):
+        with lcd(env.available_repos[repo]['path']):
             local(command)
