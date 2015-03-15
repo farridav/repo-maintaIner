@@ -4,7 +4,7 @@ import os
 import requests
 import yaml
 
-from fabric.api import env, lcd, local, task, abort
+from fabric.api import env, lcd, local, task, abort, prompt
 from fabric.colors import green, red, magenta, cyan
 
 
@@ -24,6 +24,9 @@ def populate_env():
     # Build up available repos by walking the repos directory
     env.repos = {}
     env.repo_root = os.path.join(os.path.dirname(__file__), 'repos')
+    if not os.path.isdir(env.repo_root):
+        os.makedirs(env.repo_root)
+
     for (path, dirs, files) in os.walk(env.repo_root):
         for repo in dirs:
             env.repos[repo] = {'path': os.path.join(path, repo)}
@@ -47,7 +50,7 @@ def use(repo):
 @task
 def without(repo):
     """
-    Omit the given repo (e.g: fab without:postgresql get_repos)
+    Omit the given repo (e.g: fab without:postgresql setup)
     """
     if repo in env.repos:
         del env.repos[repo]
@@ -56,10 +59,17 @@ def without(repo):
 
 
 @task
-def get_repos():
+def setup():
     """
     Clone all the repos for the given organisation
     """
+
+    # First run, setup and env.yml and track the organisation name
+    if 'organisation' not in env:
+        org = prompt('\nName of the organisation on github?\n')
+        local('echo "---\n\norganisation: {}" > env.yml'.format(org))
+        env.organisation = org
+
     response = requests.get(
         'https://api.github.com/orgs/{}/repos'.format(env.organisation))
     github_response = json.loads(response.content)
@@ -71,7 +81,11 @@ def get_repos():
                 print(green('\nCloning {}'.format(repo_name)))
                 local('git clone {}'.format(repo['ssh_url']))
 
-        print(green('{} Open issues'.format(repo['open_issues_count'])))
+        if repo['open_issues_count'] > 0:
+            print('{} has {} open issues'.format(
+                green(repo['name']),
+                red(repo['open_issues_count'])
+            ))
 
 
 @task
@@ -128,7 +142,7 @@ def pr(pr_num=None):
 @task
 def sh(command):
     """
-    Run an arbitrary shell command
+    Run an arbitrary shell command on the selected repos
     """
     for repo, data in env.repos.iteritems():
         print(green('\n{}'.format(repo)))
