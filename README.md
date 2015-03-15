@@ -18,6 +18,12 @@ the root, and put them in here, if not, you can run:
 And if prompted, enter the github organisation name, this will checkout all of
 the repos for this organisation, and tell you how many issues there are.
 
+If you only want to work with particular repos, you can use the `use` or
+`without` task here, examples:
+
+    fab use:nginx,postgresql setup
+    fab without:nodejs,apt setup
+
 ## Features
 
 All repos are selected by default when using a task, and some tasks require

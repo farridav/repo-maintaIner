@@ -10,7 +10,7 @@ from fabric.colors import green, red, magenta, cyan
 
 def populate_env():
     """
-    Populate our env with our repos
+    Populate our env with our settings and a list of available repos
     """
 
     # Load in env vars if found
@@ -37,25 +37,30 @@ populate_env()
 
 
 @task
-def use(repo):
+def use(*args):
     """
-    Use the given repo (e.g: fab use:nginx pr)
+    Use the given repos (e.g: fab use:nginx,postgresql pr)
     """
-    if repo in env.repos:
-        env.repos = {repo: env.repos[repo]}
-    else:
-        print(red('{} does not exist'.format(repo)))
+    new_repos = {}
+    for repo in args:
+        if repo in env.repos:
+            new_repos[repo] = env.repos[repo]
+        else:
+            print(red('{} does not exist, ommiting'.format(repo)))
+
+    env.repos = new_repos
 
 
 @task
-def without(repo):
+def without(*args):
     """
-    Omit the given repo (e.g: fab without:postgresql setup)
+    Omit the given repos (e.g: fab without:postgresql,nodejs setup)
     """
-    if repo in env.repos:
-        del env.repos[repo]
-    else:
-        print(red('{} does not exist'.format(repo)))
+    for repo in args:
+        if repo in env.repos:
+            del env.repos[repo]
+        else:
+            print(red('{} does not exist, skipping'.format(repo)))
 
 
 @task
