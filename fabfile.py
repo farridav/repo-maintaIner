@@ -5,7 +5,9 @@ import requests
 import yaml
 
 from fabric.api import env, lcd, local, task, abort
-from fabric.colors import green, red, magenta, cyan
+from fabric.colors import green, red, magenta
+from fabric.decorators import with_settings
+
 
 DEFAULTS = {
     'repo_root': os.path.join(os.path.dirname(__file__), 'repos'),
@@ -164,6 +166,7 @@ def pr(pr_num=None):
 
 
 @task
+@with_settings(warn_only=True)
 def sh(command):
     """
     Run an arbitrary shell command on the selected repos
